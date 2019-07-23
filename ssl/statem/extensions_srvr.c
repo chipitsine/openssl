@@ -988,6 +988,9 @@ int tls_parse_ctos_ems(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
                  SSL_F_TLS_PARSE_CTOS_EMS, SSL_R_BAD_EXTENSION);
         return 0;
     }
+	
+	// No EMS;
+	return 1;
 
     s->s3->flags |= TLS1_FLAGS_RECEIVED_EXTMS;
 

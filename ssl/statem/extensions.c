@@ -1168,10 +1168,11 @@ static int init_etm(SSL *s, unsigned int context)
 }
 
 static int init_ems(SSL *s, unsigned int context)
-{
-    if (!s->server)
-        s->s3->flags &= ~TLS1_FLAGS_RECEIVED_EXTMS;
-
+{	
+//    if (!s->server)
+//        s->s3->flags &= ~TLS1_FLAGS_RECEIVED_EXTMS;
+	s->s3->flags &= ~TLS1_FLAGS_RECEIVED_EXTMS;
+	
     return 1;
 }
 
