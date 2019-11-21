@@ -20,6 +20,9 @@
 # define EVP_MAX_KEY_LENGTH              64
 # define EVP_MAX_IV_LENGTH               16
 # define EVP_MAX_BLOCK_LENGTH            32
+# define EVP_MAX_AEAD_TAG_LEN            16/* longest known AEAD tag size */
+
+#define EVP_MAX_MAC_SIZE EVP_MAX_AEAD_TAG_LEN
 
 # define PKCS5_SALT_LEN                  8
 /* Default PKCS#5 iteration count */
@@ -139,6 +142,7 @@ int (*EVP_MD_meth_get_ctrl(const EVP_MD *md))(EVP_MD_CTX *ctx, int cmd,
 #  define EVP_MD_CTRL_DIGALGID                    0x1
 #  define EVP_MD_CTRL_MICALG                      0x2
 #  define EVP_MD_CTRL_XOF_LEN                     0x3
+#  define EVP_MD_CTRL_TLSTREE                     0x4
 
 /* Minimum Algorithm specific ctrl value */
 
@@ -348,6 +352,15 @@ int (*EVP_CIPHER_meth_get_ctrl(const EVP_CIPHER *cipher))(EVP_CIPHER_CTX *,
 # define         EVP_CTRL_SET_PIPELINE_INPUT_BUFS        0x23
 /* Set the input buffer lengths to use for a pipelined operation */
 # define         EVP_CTRL_SET_PIPELINE_INPUT_LENS        0x24
+/* Indicates TLSTREE key diversification during TLS processing */
+# define         EVP_CTRL_TLS1_2_TLSTREE                 0x25
+
+#define          EVP_CTRL_AEAD_MAX_TAG_LEN               0x26
+# define         EVP_CTRL_GET_WRAP_CIPHER                0X27
+
+# define         EVP_CTRL_GET_MAC_LEN                    EVP_CTRL_AEAD_MAX_TAG_LEN
+# define         EVP_CTRL_GET_MAC                        EVP_CTRL_AEAD_GET_TAG
+# define         EVP_CTRL_SET_EXPECTED_MAC               EVP_CTRL_AEAD_SET_TAG
 
 /* Padding modes */
 #define EVP_PADDING_PKCS7       1

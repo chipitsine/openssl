@@ -113,6 +113,11 @@ int tls1_change_cipher_state(SSL *s, int which)
         else
             s->mac_flags &= ~SSL_MAC_FLAG_READ_MAC_STREAM;
 
+        if (s->s3->tmp.new_cipher->algorithm2 & TLS1_TLSTREE)
+            s->mac_flags |= SSL_MAC_FLAG_READ_MAC_TLSTREE;
+        else
+            s->mac_flags &= ~SSL_MAC_FLAG_READ_MAC_TLSTREE;
+
         if (s->enc_read_ctx != NULL) {
             reuse_dd = 1;
         } else if ((s->enc_read_ctx = EVP_CIPHER_CTX_new()) == NULL) {
@@ -160,6 +165,11 @@ int tls1_change_cipher_state(SSL *s, int which)
             s->mac_flags |= SSL_MAC_FLAG_WRITE_MAC_STREAM;
         else
             s->mac_flags &= ~SSL_MAC_FLAG_WRITE_MAC_STREAM;
+
+        if (s->s3->tmp.new_cipher->algorithm2 & TLS1_TLSTREE)
+            s->mac_flags |= SSL_MAC_FLAG_WRITE_MAC_TLSTREE;
+        else
+            s->mac_flags &= ~SSL_MAC_FLAG_WRITE_MAC_TLSTREE;
         if (s->enc_write_ctx != NULL && !SSL_IS_DTLS(s)) {
             reuse_dd = 1;
         } else if ((s->enc_write_ctx = EVP_CIPHER_CTX_new()) == NULL) {
@@ -223,6 +233,12 @@ int tls1_change_cipher_state(SSL *s, int which)
         k = EVP_GCM_TLS_FIXED_IV_LEN;
     else if (EVP_CIPHER_mode(c) == EVP_CIPH_CCM_MODE)
         k = EVP_CCM_TLS_FIXED_IV_LEN;
+#ifndef OPENSSL_NO_GOST
+    /* Here we init the 2nd half of iv by zeroes */
+    else if ((EVP_CIPHER_nid(c) == NID_id_tc26_cipher_gostr3412_2015_kuznyechik_ctracpkm) 
+            || (EVP_CIPHER_nid(c) == NID_id_tc26_cipher_gostr3412_2015_magma_ctracpkm))
+        k = EVP_CIPHER_iv_length(c)/2;
+#endif
     else
         k = EVP_CIPHER_iv_length(c);
     if ((which == SSL3_CHANGE_CIPHER_CLIENT_WRITE) ||
@@ -298,11 +314,26 @@ int tls1_change_cipher_state(SSL *s, int which)
             goto err;
         }
     } else {
-        if (!EVP_CipherInit_ex(dd, c, NULL, key, iv, (which & SSL3_CC_WRITE))) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS1_CHANGE_CIPHER_STATE,
-                     ERR_R_INTERNAL_ERROR);
-            goto err;
+      /* Here we init the 2nd half of iv by zeroes FIXME beldmit */
+      if ((EVP_CIPHER_nid(c) == NID_id_tc26_cipher_gostr3412_2015_kuznyechik_ctracpkm)
+         || (EVP_CIPHER_nid(c) == NID_id_tc26_cipher_gostr3412_2015_magma_ctracpkm))
+      {
+        unsigned char real_iv[16];
+        memset(real_iv, 0, sizeof(real_iv));
+        memcpy(real_iv, iv, EVP_CIPHER_iv_length(c)/2);
+        if (!EVP_CipherInit_ex(dd, c, NULL, key, real_iv, (which & SSL3_CC_WRITE))) {
+          OPENSSL_cleanse(real_iv, sizeof(real_iv));
+          SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS1_CHANGE_CIPHER_STATE,
+              ERR_R_INTERNAL_ERROR);
+          goto err;
         }
+        OPENSSL_cleanse(real_iv, sizeof(real_iv));
+      }
+      else if (!EVP_CipherInit_ex(dd, c, NULL, key, iv, (which & SSL3_CC_WRITE))) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS1_CHANGE_CIPHER_STATE,
+            ERR_R_INTERNAL_ERROR);
+        goto err;
+      }
     }
     /* Needed for "composite" AEADs, such as RC4-HMAC-MD5 */
     if ((EVP_CIPHER_flags(c) & EVP_CIPH_FLAG_AEAD_CIPHER) && *mac_secret_size
@@ -438,6 +469,10 @@ size_t tls1_final_finish_mac(SSL *s, const char *str, size_t slen,
 {
     size_t hashlen;
     unsigned char hash[EVP_MAX_MD_SIZE];
+    size_t finished_size = TLS1_FINISH_MAC_LENGTH;
+
+    if (s->s3->tmp.new_cipher->algorithm_mkey & SSL_kGOST18)
+        finished_size = 32;
 
     if (!ssl3_digest_cached_records(s, 0)) {
         /* SSLfatal() already called */
@@ -451,12 +486,12 @@ size_t tls1_final_finish_mac(SSL *s, const char *str, size_t slen,
 
     if (!tls1_PRF(s, str, slen, hash, hashlen, NULL, 0, NULL, 0, NULL, 0,
                   s->session->master_key, s->session->master_key_length,
-                  out, TLS1_FINISH_MAC_LENGTH, 1)) {
+                  out, finished_size, 1)) {
         /* SSLfatal() already called */
         return 0;
     }
     OPENSSL_cleanse(hash, hashlen);
-    return TLS1_FINISH_MAC_LENGTH;
+    return finished_size;
 }
 
 int tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,

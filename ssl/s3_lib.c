@@ -2665,6 +2665,38 @@ static SSL_CIPHER ssl3_ciphers[] = {
      0,
      0,
      },
+    {
+     1,
+     "GOST2012-KUZNYECHIK-KUZNYECHIKOMAC",
+     NULL,
+     0x0300C100,
+     SSL_kGOST18,
+     SSL_aGOST12,
+     SSL_KUZNYECHIK,
+     SSL_KUZNYECHIKOMAC,
+     TLS1_2_VERSION, TLS1_2_VERSION,
+     0, 0,
+     SSL_HIGH,
+     SSL_HANDSHAKE_MAC_GOST12_256 | TLS1_PRF_GOST12_256 | TLS1_TLSTREE,
+     256,
+     256,
+     },
+    {
+     1,
+     "GOST2012-MAGMA-MAGMAOMAC",
+     NULL,
+     0x0300C101,
+     SSL_kGOST18,
+     SSL_aGOST12,
+     SSL_MAGMA,
+     SSL_MAGMAOMAC,
+     TLS1_2_VERSION, TLS1_2_VERSION,
+     0, 0,
+     SSL_HIGH,
+     SSL_HANDSHAKE_MAC_GOST12_256 | TLS1_PRF_GOST12_256 | TLS1_TLSTREE,
+     256,
+     256,
+     },
 #endif                          /* OPENSSL_NO_GOST */
 
 #ifndef OPENSSL_NO_IDEA
@@ -4348,6 +4380,9 @@ int ssl3_get_req_cert_type(SSL *s, WPACKET *pkt)
     if (s->version >= TLS1_VERSION && (alg_k & SSL_kGOST))
             return WPACKET_put_bytes_u8(pkt, TLS_CT_GOST01_SIGN)
                     && WPACKET_put_bytes_u8(pkt, TLS_CT_GOST12_SIGN)
+                    && WPACKET_put_bytes_u8(pkt, TLS_CT_GOST12_512_SIGN);
+    if (s->version >= TLS1_2_VERSION && (alg_k & SSL_kGOST18))
+            return WPACKET_put_bytes_u8(pkt, TLS_CT_GOST12_SIGN)
                     && WPACKET_put_bytes_u8(pkt, TLS_CT_GOST12_512_SIGN);
 #endif
 

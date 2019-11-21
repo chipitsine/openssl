@@ -3433,6 +3433,107 @@ static int tls_process_cke_gost(SSL *s, PACKET *pkt)
 #endif
 }
 
+static int tls_process_cke_gost18(SSL *s, PACKET *pkt)
+{/* FIXME beldmit - function id to be renamed either*/
+#ifndef OPENSSL_NO_GOST
+	unsigned char rnd_dgst[32];
+	unsigned int md_len;
+	EVP_MD_CTX * hash = NULL;
+	EVP_PKEY_CTX *pkey_ctx = NULL;
+	EVP_PKEY *pk = NULL;
+	unsigned char premaster_secret[32];
+	const unsigned char *start = NULL;
+	size_t outlen = 32, inlen = 0;
+	int ret = 0;
+	int cipher_nid = NID_undef;
+
+	if ((s->s3->tmp.new_cipher->algorithm_enc & SSL_MAGMA) != 0)
+		cipher_nid = NID_magma_ctr;
+	else if ((s->s3->tmp.new_cipher->algorithm_enc & SSL_KUZNYECHIK) != 0)
+		cipher_nid = NID_grasshopper_ctr;
+	else {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				ERR_R_INTERNAL_ERROR);
+	}
+
+	hash = EVP_MD_CTX_new();
+	if (hash == NULL
+			|| EVP_DigestInit(hash, EVP_get_digestbynid(NID_id_GostR3411_2012_256)) <= 0
+			|| EVP_DigestUpdate(hash, s->s3->client_random,
+				SSL3_RANDOM_SIZE) <= 0
+			|| EVP_DigestUpdate(hash, s->s3->server_random,
+				SSL3_RANDOM_SIZE) <= 0
+			|| EVP_DigestFinal_ex(hash, rnd_dgst, &md_len) <= 0) {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				ERR_R_INTERNAL_ERROR);
+		goto err;
+	}
+	EVP_MD_CTX_free(hash);
+	hash = NULL;
+
+	/* Get our certificate private key */
+	pk = s->cert->pkeys[SSL_PKEY_GOST12_512].privatekey
+		? s->cert->pkeys[SSL_PKEY_GOST12_512].privatekey : s->cert->pkeys[SSL_PKEY_GOST12_256].privatekey;
+	if (pk == NULL) {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				SSL_R_BAD_HANDSHAKE_STATE);
+		return 0;
+	}
+
+	pkey_ctx = EVP_PKEY_CTX_new(pk, NULL);
+	if (pkey_ctx == NULL) {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				ERR_R_MALLOC_FAILURE);
+		return 0;
+	}
+	if (EVP_PKEY_decrypt_init(pkey_ctx) <= 0) {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				ERR_R_INTERNAL_ERROR);
+		return 0;
+	}
+	/* 
+	 * Reuse EVP_PKEY_CTRL_SET_IV, make choice in engine code depending on size
+	 * */
+	if (EVP_PKEY_CTX_ctrl(pkey_ctx, -1, EVP_PKEY_OP_DECRYPT,
+				EVP_PKEY_CTRL_SET_IV, 32, rnd_dgst) < 0) {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				SSL_R_LIBRARY_BUG);
+		goto err;
+	}
+
+	if (EVP_PKEY_CTX_ctrl(pkey_ctx, -1, EVP_PKEY_OP_DECRYPT,
+				EVP_PKEY_CTRL_CIPHER, cipher_nid, NULL) < 0) {
+		SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				SSL_R_LIBRARY_BUG);
+		goto err;
+	}
+	inlen = PACKET_remaining(pkt);
+	start = PACKET_data(pkt);
+
+	if (EVP_PKEY_decrypt(pkey_ctx, premaster_secret, &outlen, start,
+				inlen) <= 0) {
+		SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+				SSL_R_DECRYPTION_FAILED);
+		goto err;
+	}
+	/* Generate master secret */
+	if (!ssl_generate_master_secret(s, premaster_secret,
+				sizeof(premaster_secret), 0)) {
+		/* SSLfatal() already called */
+		goto err;
+	}
+	ret = 1;
+err:
+	EVP_PKEY_CTX_free(pkey_ctx);
+	return ret;
+#else
+	/* Should never happen */
+	SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CKE_GOST18,
+			ERR_R_INTERNAL_ERROR);
+	return 0;
+#endif
+}
+
 MSG_PROCESS_RETURN tls_process_client_key_exchange(SSL *s, PACKET *pkt)
 {
     unsigned long alg_k;
@@ -3480,6 +3581,11 @@ MSG_PROCESS_RETURN tls_process_client_key_exchange(SSL *s, PACKET *pkt)
         }
     } else if (alg_k & SSL_kGOST) {
         if (!tls_process_cke_gost(s, pkt)) {
+            /* SSLfatal() already called */
+            goto err;
+        }
+    } else if (alg_k & SSL_kGOST18) {
+        if (!tls_process_cke_gost18(s, pkt)) {
             /* SSLfatal() already called */
             goto err;
         }
